@@ -10,6 +10,9 @@ clause-length pieces on natural boundaries (paragraph breaks, then sentence brea
 import json
 import random
 import re
+import pandas as pd
+from sklearn.model_selection import GroupShuffleSplit
+from transformers import AutoTokenizer
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -264,3 +267,76 @@ def load_negative_examples(
             })
 
     return examples
+
+data = load_cuad()
+pos = load_positive_examples(data)
+neg = load_negative_examples(data, min_len=20, max_len=600)
+combined_list = pos + neg
+df = pd.DataFrame(combined_list)
+
+print(len(df))
+print(df["contract_id"].nunique())
+print(df["category"].value_counts())
+
+gss1 = GroupShuffleSplit(n_splits=1, train_size=0.8, random_state=42)
+train_idx, temp_idx = next(gss1.split(df, groups=df["contract_id"]))
+train_df = df.iloc[train_idx]
+temp_df = df.iloc[temp_idx]
+
+gss2 = GroupShuffleSplit(n_splits=1, train_size=0.5, random_state=42)
+val_idx, test_idx = next(gss2.split(temp_df, groups=temp_df["contract_id"]))
+val_df = temp_df.iloc[val_idx]
+test_df = temp_df.iloc[test_idx]
+
+print(len(train_df), len(val_df), len(test_df))
+print(train_df["contract_id"].nunique(), val_df["contract_id"].nunique(), test_df["contract_id"].nunique())
+
+train_contracts = set(train_df["contract_id"])
+val_contracts = set(val_df["contract_id"])
+test_contracts = set(test_df["contract_id"])
+
+print(train_contracts & val_contracts)
+print(train_contracts & test_contracts)
+print(val_contracts & test_contracts)
+
+print(train_df[train_df["category"]=="Price Restrictions"].shape[0])
+print(val_df[val_df["category"]=="Price Restrictions"].shape[0])
+print(test_df[test_df["category"]=="Price Restrictions"].shape[0])
+
+def cap_categories(df, max_per_category, seed=42):
+    capped_groups = []
+    for category, group in df.groupby("category"):
+        if len(group) <= max_per_category:
+            capped_groups.append(group)
+        else:
+            capped_groups.append(group.sample(n=max_per_category, random_state=seed))
+    return pd.concat(capped_groups)
+
+capped_train_df = cap_categories(train_df, 600, seed=42)
+print(capped_train_df["category"].value_counts())
+
+tokenizer = AutoTokenizer.from_pretrained("microsoft/Phi-3-mini-4k-instruct", trust_remote_code=True)
+
+messages = [
+    {"role": "user", "content": "PLACEHOLDER_CLAUSE_TEXT"},
+    {"role": "assistant", "content": "PLACEHOLDER_CATEGORY"},
+]
+
+full_format = tokenizer.apply_chat_template(messages, tokenize=False)
+print(repr(full_format))
+
+inference_format = tokenizer.apply_chat_template(messages[:1], tokenize=False, add_generation_prompt=True)
+print(repr(inference_format))
+
+INSTRUCTION_TEMPLATE = """Classify the following contract clause into its category, or respond with "None" if it does not match any category. Respond with only the category name and nothing else.
+
+Clause:
+{clause_text}"""
+
+combined_df = df.copy()
+longest = combined_df.sort_values("text", key=lambda col: col.str.len(), ascending=False).head(5)
+
+for _, row in longest.iterrows():
+    full_text = INSTRUCTION_TEMPLATE.format(clause_text=row["text"])
+    token_count = len(tokenizer.encode(full_text))
+    print(len(row["text"]), token_count)
