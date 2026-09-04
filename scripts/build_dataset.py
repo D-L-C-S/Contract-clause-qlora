@@ -27,7 +27,14 @@ MODEL_NAME = "microsoft/Phi-3-mini-4k-instruct"
 MIN_LEN = 20
 MAX_LEN = 600
 TRAIN_SIZE = 0.8
-CAP_PER_CATEGORY = 600
+# Reduced from 600 due to free-tier Colab T4 compute constraints: a
+# bitsandbytes/GradScaler bug (documented upstream, e.g. pytorch#127176)
+# forced disabling fp16 mixed precision entirely, making full-scope
+# training (~1,905 steps, 3 epochs) take an estimated ~55 hours. Reduced
+# scope to fit a realistic free-tier session budget (~10.8 hours at 80,
+# 2 epochs, 374 total steps) while preserving rare-category representation
+# via re-capping rather than random subsampling.
+CAP_PER_CATEGORY = 80
 SEED = 42
 
 OUTPUT_DIR = PROJECT_ROOT / "data" / "processed"
