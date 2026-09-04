@@ -323,6 +323,15 @@ def format_example(example: dict, tokenizer) -> dict:
     renders both through the tokenizer's chat template to produce the exact
     string the model will be trained on.
 
+    Also produces separate "prompt" and "completion" strings (rather than
+    only the merged "text"), so training can use completion-only loss
+    masking — computing loss only on the assistant's response tokens,
+    not the (long, identical-every-time) instruction tokens. "prompt" is
+    the user-turn rendering with add_generation_prompt=True (i.e. what an
+    inference-time prompt looks like); "completion" is everything the full
+    two-turn rendering adds after that point (the category, plus the
+    <|end|>/<|endoftext|> tokens the model needs to learn to stop on).
+
     Args:
         example: A {"contract_id", "category", "text"} dict, e.g. one row
             from load_positive_examples()/load_negative_examples().
@@ -331,20 +340,25 @@ def format_example(example: dict, tokenizer) -> dict:
 
     Returns:
         {"contract_id", "category", "clause_text" (original, unformatted
-        clause text, kept for debugging), "text" (the full chat-templated
-        training string)}.
+        clause text, kept for debugging), "prompt", "completion", "text"
+        (prompt + completion, kept for convenience/debugging)}.
     """
     messages = [
         {"role": "user", "content": INSTRUCTION_TEMPLATE.format(clause_text=example["text"])},
         {"role": "assistant", "content": example["category"]},
     ]
-    formatted_text = tokenizer.apply_chat_template(messages, tokenize=False)
+
+    prompt = tokenizer.apply_chat_template(messages[:1], tokenize=False, add_generation_prompt=True)
+    full_text = tokenizer.apply_chat_template(messages, tokenize=False)
+    completion = full_text[len(prompt):]
 
     return {
         "contract_id": example["contract_id"],
         "category": example["category"],
         "clause_text": example["text"],
-        "text": formatted_text,
+        "prompt": prompt,
+        "completion": completion,
+        "text": full_text,
     }
 
 
