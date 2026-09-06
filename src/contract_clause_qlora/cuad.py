@@ -10,6 +10,10 @@ Once positive/negative examples are combined, split, and (for train) balanced,
 format_example()/format_split() render them into Phi-3-mini-4k-instruct's chat
 format for supervised fine-tuning, and write_jsonl() serializes a split to disk.
 
+build_inference_prompt() and parse_prediction() support inference (eval notebook,
+Streamlit app) — building a prompt from raw clause text alone, and parsing a
+model's raw generated text back into a valid category label.
+
 See scripts/build_dataset.py for the orchestration that runs this end to end.
 """
 
@@ -315,6 +319,28 @@ Clause:
 {clause_text}"""
 
 
+def build_inference_prompt(clause_text: str, tokenizer) -> str:
+    """Build the inference-ready prompt for a single clause, ending at
+    <|assistant|> with no target completion appended.
+
+    This is the shared prompt-construction logic used by both training
+    (via format_example) and inference (eval notebook, Streamlit app),
+    ensuring consistency between what the model was trained on and what
+    it's actually prompted with at inference time.
+
+    Args:
+        clause_text: The raw clause/gap text to classify.
+        tokenizer: The model's tokenizer, for applying its chat template.
+
+    Returns:
+        The formatted prompt string, ready for tokenization and generation.
+    """
+    messages = [
+        {"role": "user", "content": INSTRUCTION_TEMPLATE.format(clause_text=clause_text)},
+    ]
+    return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
+
 def format_example(example: dict, tokenizer) -> dict:
     """Format one (contract_id, category, text) row into a Phi-3 training example.
 
@@ -327,10 +353,10 @@ def format_example(example: dict, tokenizer) -> dict:
     only the merged "text"), so training can use completion-only loss
     masking — computing loss only on the assistant's response tokens,
     not the (long, identical-every-time) instruction tokens. "prompt" is
-    the user-turn rendering with add_generation_prompt=True (i.e. what an
-    inference-time prompt looks like); "completion" is everything the full
-    two-turn rendering adds after that point (the category, plus the
-    <|end|>/<|endoftext|> tokens the model needs to learn to stop on).
+    built via build_inference_prompt() (i.e. what an inference-time prompt
+    looks like); "completion" is everything the full two-turn rendering
+    adds after that point (the category, plus the <|end|>/<|endoftext|>
+    tokens the model needs to learn to stop on).
 
     Args:
         example: A {"contract_id", "category", "text"} dict, e.g. one row
@@ -348,7 +374,7 @@ def format_example(example: dict, tokenizer) -> dict:
         {"role": "assistant", "content": example["category"]},
     ]
 
-    prompt = tokenizer.apply_chat_template(messages[:1], tokenize=False, add_generation_prompt=True)
+    prompt = build_inference_prompt(example["text"], tokenizer)
     full_text = tokenizer.apply_chat_template(messages, tokenize=False)
     completion = full_text[len(prompt):]
 
@@ -391,3 +417,45 @@ def write_jsonl(examples: list[dict], path: Path) -> None:
     with open(path, "w", encoding="utf-8") as f:
         for example in examples:
             f.write(json.dumps(example, ensure_ascii=False) + "\n")
+
+
+# --- Inference helpers --------------------------------------------------------
+# Parsing a model's raw generated text back into a valid category label.
+# Used by the eval notebook and the Streamlit app.
+
+def parse_prediction(raw_text: str, valid_categories: set) -> str:
+    """Parse a model's raw generated text into a valid category label.
+
+    Uses a cascading match strategy (exact -> case-insensitive -> trailing
+    punctuation stripped) rather than aggressive upfront normalization,
+    since several real category names contain meaningful punctuation
+    (e.g. "Rofr/Rofo/Rofn", "Affiliate License-Licensee"). Anything that
+    doesn't match after these attempts is labeled "INVALID" rather than
+    silently coerced into an existing category -- this preserves the
+    ability to measure how often a model fails to produce parseable
+    output at all, a distinct and important failure mode from picking
+    the wrong (but valid) category.
+
+    Args:
+        raw_text: The model's raw generated text.
+        valid_categories: The set of valid category label strings.
+
+    Returns:
+        The matched category name (correctly cased), or "INVALID".
+    """
+    stripped = raw_text.strip()
+
+    if stripped in valid_categories:
+        return stripped
+
+    lowercase_lookup = {cat.lower(): cat for cat in valid_categories}
+    if stripped.lower() in lowercase_lookup:
+        return lowercase_lookup[stripped.lower()]
+
+    trailing_stripped = stripped.rstrip('.\'"')
+    if trailing_stripped in valid_categories:
+        return trailing_stripped
+    if trailing_stripped.lower() in lowercase_lookup:
+        return lowercase_lookup[trailing_stripped.lower()]
+
+    return "INVALID"
