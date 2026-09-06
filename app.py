@@ -1,3 +1,12 @@
+"""Streamlit demo: classify a pasted contract clause with the fine-tuned
+Phi-3 + LoRA adapter, showing the zero-shot base model's prediction
+alongside it via peft's disable_adapter() (same trick used in the eval
+notebook) rather than loading two separate model copies.
+
+Deliberately self-contained (no contract_clause_qlora import) and runs on
+CPU (device_map="cpu" below) for public deployment, where there's no GPU.
+"""
+
 import streamlit as st
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
@@ -61,6 +70,10 @@ VALID_CATEGORIES = {
 
 
 def build_inference_prompt(clause_text, tokenizer):
+    """Build an inference-ready prompt, ending at <|assistant|> with no completion.
+
+    See cuad.py for full docs -- this is a straight copy.
+    """
     messages = [
         {"role": "user", "content": INSTRUCTION_TEMPLATE.format(clause_text=clause_text)},
     ]
@@ -68,6 +81,11 @@ def build_inference_prompt(clause_text, tokenizer):
 
 
 def parse_prediction(raw_text, valid_categories):
+    """Parse raw generated text into a valid category, or "INVALID".
+
+    Cascading exact -> case-insensitive -> punctuation-stripped match; see
+    cuad.py for the full rationale (also a straight copy).
+    """
     stripped = raw_text.strip()
 
     if stripped in valid_categories:
@@ -96,6 +114,14 @@ EXAMPLE_CLAUSES = {
 
 @st.cache_resource
 def load_model():
+    """Load the base model + LoRA adapter once and cache across reruns.
+
+    Streamlit reruns this whole script on every widget interaction --
+    without @st.cache_resource, the ~2GB 4-bit model would reload from
+    scratch on every button click. device_map="cpu" is deliberate: public
+    deployment (Streamlit Community Cloud / HF Spaces free tier) has no
+    GPU, and this has been verified to work correctly on CPU-only.
+    """
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
@@ -118,11 +144,19 @@ def load_model():
 
 
 def classify(clause_text, model, tokenizer, use_adapter=True):
+    """Generate and parse a category prediction for one clause.
+
+    use_adapter=False generates inside peft's disable_adapter() context,
+    giving the zero-shot base model's prediction from the same loaded
+    model -- no second model copy needed, same trick as the eval notebook.
+    """
     prompt = build_inference_prompt(clause_text, tokenizer)
     inputs = tokenizer(prompt, return_tensors="pt")
     prompt_len = inputs["input_ids"].shape[1]
 
     with torch.inference_mode():
+        # 18 = longest category name's token count + small buffer (same
+        # value used for eval generation, derived empirically there).
         if use_adapter:
             output = model.generate(**inputs, max_new_tokens=18)
         else:
@@ -150,6 +184,9 @@ with st.expander("About this project"):
 model, tokenizer = load_model()
 
 st.write("**Try an example:**")
+# Setting session_state["clause_text"] here populates the text_area below,
+# since it shares that same widget key -- Streamlit's way of letting one
+# widget's interaction update another's value.
 example_cols = st.columns(len(EXAMPLE_CLAUSES))
 for col, (label, text) in zip(example_cols, EXAMPLE_CLAUSES.items()):
     if col.button(label):
