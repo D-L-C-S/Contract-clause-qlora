@@ -12,10 +12,17 @@ __pycache__/
 .ipynb_checkpoints/
 
 # Data (CUAD raw/processed - don't commit, re-downloadable)
-data/
+# NOTE: "data/*" (not "data/") so negation rules below can re-include
+# specific files - a bare "data/" directory-exclusion blocks git from
+# traversing inside it at all, silently defeating any "!data/..." rule.
+data/*
 *.csv
 *.jsonl
 !data/README.md
+# Exception: eval predictions are compute-derived evidence for reported
+# results (~3 hrs GPU inference), not a cheaply-regenerable input like the
+# CUAD-derived train/val/test splits - worth preserving directly.
+!data/eval_results.jsonl
 
 # Model artifacts
 *.safetensors
