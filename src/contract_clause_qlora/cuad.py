@@ -319,6 +319,57 @@ Clause:
 {clause_text}"""
 
 
+# Fixed, known set of CUAD's 41 clause categories plus "None". Hardcoded
+# rather than derived from data files at runtime, since (a) it's a fixed
+# fact about CUAD's label space, not something that needs re-deriving each
+# time, and (b) data/ is gitignored, so a fresh clone (e.g. a deployed
+# Streamlit app) wouldn't have the JSONL files to derive it from anyway.
+VALID_CATEGORIES = {
+    "Affiliate License-Licensee",
+    "Affiliate License-Licensor",
+    "Agreement Date",
+    "Anti-Assignment",
+    "Audit Rights",
+    "Cap On Liability",
+    "Change Of Control",
+    "Competitive Restriction Exception",
+    "Covenant Not To Sue",
+    "Document Name",
+    "Effective Date",
+    "Exclusivity",
+    "Expiration Date",
+    "Governing Law",
+    "Insurance",
+    "Ip Ownership Assignment",
+    "Irrevocable Or Perpetual License",
+    "Joint Ip Ownership",
+    "License Grant",
+    "Liquidated Damages",
+    "Minimum Commitment",
+    "Most Favored Nation",
+    "No-Solicit Of Customers",
+    "No-Solicit Of Employees",
+    "Non-Compete",
+    "Non-Disparagement",
+    "Non-Transferable License",
+    "None",
+    "Notice Period To Terminate Renewal",
+    "Parties",
+    "Post-Termination Services",
+    "Price Restrictions",
+    "Renewal Term",
+    "Revenue/Profit Sharing",
+    "Rofr/Rofo/Rofn",
+    "Source Code Escrow",
+    "Termination For Convenience",
+    "Third Party Beneficiary",
+    "Uncapped Liability",
+    "Unlimited/All-You-Can-Eat-License",
+    "Volume Restriction",
+    "Warranty Duration",
+}
+
+
 def build_inference_prompt(clause_text: str, tokenizer) -> str:
     """Build the inference-ready prompt for a single clause, ending at
     <|assistant|> with no target completion appended.
