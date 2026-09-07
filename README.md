@@ -2,7 +2,7 @@
 
 Fine-tuning **Phi-3-mini-4k-instruct** with **QLoRA** to classify legal contract clauses into one of CUAD's 41 categories (plus "None"), trained on the [CUAD](https://www.atticusprojectai.org/cuad) (Contract Understanding Atlas Dataset) dataset.
 
-**[Try the live demo →](#)** *(link pending deployment)*
+Runs locally via `streamlit run app.py` (see [Running it yourself](#running-it-yourself) below) — public deployment was attempted and set aside due to free-tier memory constraints; see [`deploy/`](deploy/README.md) for what was tried.
 
 ## Results
 
@@ -32,6 +32,7 @@ A few things worth calling out, since they shaped real decisions in this project
 - **Free-tier GPU constraints drove the training config.** Colab's free-tier T4 (Turing architecture) has no native bf16 support, and a documented `bitsandbytes`/PyTorch `GradScaler` bug (matching [pytorch#127176](https://github.com/pytorch/pytorch/issues/127176)) ruled out fp16 too — forcing full fp32 training. At the original planned scope, that was estimated at ~55 hours; the training scope (category cap, epoch count) was reduced to fit a realistic free-tier session budget while preserving rare-category representation.
 - **A genuinely difficult debugging session** traced a reproducible, silent training hang through five ruled-out hypotheses (LoRA dtype, precision-mode mismatch, DataLoader worker/pinned-memory interaction, gradient checkpointing mode) before discovering the actual cause: a Colab kernel that had never been genuinely restarted across "different" test runs, carrying contaminated GPU/process state between them.
 - **The evaluation includes real failure-mode analysis**, not just an accuracy number — a qualitative investigation into *why* the model's `None`-class recall is imperfect (a mix of genuine CUAD annotation gaps and real model imprecision), and a most-confused-category-pairs analysis surfacing specific, interpretable error patterns rather than a raw confusion matrix.
+- **Public deployment hit a genuine platform memory ceiling.** Two diagnosed failures on Streamlit Community Cloud's free tier — a dependency-file auto-detection conflict, then a silent process kill during model loading consistent with the transient memory spike quantized loading requires (holding original fp16 weights before conversion, well above the final ~2GB quantized size). See [`deploy/`](deploy/README.md) for the full investigation and the decision to run locally instead.
 
 ## Known limitations
 
@@ -42,7 +43,7 @@ A few things worth calling out, since they shaped real decisions in this project
 
 ## Project structure
 
-```
+```text
 scripts/build_dataset.py   - data pipeline: raw CUAD -> train/val/test JSONL
 src/contract_clause_qlora/ - reusable package (data processing, prompt formatting, parsing)
 notebooks/train_qlora.ipynb - QLoRA fine-tuning (run on Colab, T4 GPU)
